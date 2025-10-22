@@ -12,6 +12,12 @@ class Block(Node):
         super().__init__(upper_bound)
         self.entries = {}
 
+    def size(self):
+        return len(self.entries)
+
+    def __len__(self):
+        return self.size()
+
 
 class BlockTree(RedBlackTree):
 
