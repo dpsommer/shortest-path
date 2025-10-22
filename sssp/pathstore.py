@@ -121,6 +121,9 @@ class PathStore:
         self._counter = itertools.count()
         self._removed_entries = {}
 
+    def is_empty(self):
+        return len(self.batch_entries) > 0 or self.block_tree.size() > 0
+
     def insert(self, key, value):
         self.block_tree.insert(key, value)
 
