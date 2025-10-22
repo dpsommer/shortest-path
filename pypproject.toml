@@ -1,0 +1,26 @@
+[project]
+name = "sssp"
+authors = [
+  { name = "Duncan Sommerville", email = "duncan.sommerville@gmail.com" },
+]
+description = "Python implementation of novel single-source shortest-path algorithm"
+readme = "README.md"
+requires-python = ">=3.10"
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Operating System :: OS Independent",
+]
+
+[project.urls]
+Homepage = "https://github.com/dpsommer/shortest-path"
+Issues = "https://github.com/dpsommer/shortest-path/issues"
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-ra -q -p no:warnings"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+
+[tool.bandit.assert_used]
+skips = ["**/*_test.py", "**/test_*.py"]

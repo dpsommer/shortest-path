@@ -1,1 +1,3 @@
+-e .
 networkx==3.5
+pytest==8.4.2

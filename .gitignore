@@ -1,0 +1,18 @@
+# ide
+.vscode
+
+# build files
+build/
+dist/
+
+# python
+*.pyc
+__pycache__/
+.python-version
+
+# scm automated versioning file
+version.py
+
+# misc
+TODO*
+scratch*
