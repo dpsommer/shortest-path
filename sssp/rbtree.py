@@ -133,7 +133,7 @@ class RedBlackTree:
             node = node.left
         return node
 
-    def remove(self, node: Node) -> Node:
+    def remove(self, node: Node):
         """Remove the given node and rebalance the tree"""
         if node is None:
             return
@@ -168,7 +168,7 @@ class RedBlackTree:
 
         # if this is the root, reset the tree
         if parent is None:
-            self.root = Node(math.inf)
+            self.clear()
             return
 
         # otherwise, remove the child
