@@ -15,28 +15,47 @@ class Colour(enum.Enum):
     RED = 1
 
 
-class BlockTreeNode:
+def median_split(batch: list, size: int):
+    """Bisects list repeatedly until all segments have `size` elements or fewer
+
+    Args:
+        batch (list): list of elements to split
+        size (int): max size of sublists
+
+    Returns:
+        list: list of bisected sublists
+    """
+    if len(batch) <= size:
+        return [batch]
+
+    mid = math.ceil(len(batch) / 2)
+    return median_split(batch[mid:], size) + median_split(batch[:mid], size)
+
+
+class Node:
 
     def __init__(self, upper_bound: float):
-        self.parent: Optional[BlockTreeNode] = None
-        self.right: Optional[BlockTreeNode] = None
-        self.left: Optional[BlockTreeNode] = None
+        self.parent: Optional[Node] = None
+        self.right: Optional[Node] = None
+        self.left: Optional[Node] = None
         self.colour = Colour.BLACK
         self.value = upper_bound
         self.entries = {}
 
-    def get_child(self, dir: Direction):
-        if dir == Direction.LEFT:
+    def get_child(self, direction: Direction):
+        if direction == Direction.LEFT:
             return self.left
         return self.right
 
-    def set_child(self, dir: Direction, node: "BlockTreeNode"):
-        if dir == Direction.LEFT:
+    def set_child(self, direction: Direction, node: Optional["Node"]):
+        if direction == Direction.LEFT:
             self.left = node
         else:
             self.right = node
 
-    def get_direction(self):
+    def get_direction(self) -> Optional[Direction]:
+        if self.parent is None:
+            return None
         return Direction.LEFT if self == self.parent.left else Direction.RIGHT
 
 
@@ -45,29 +64,29 @@ class BlockTree:
     def __init__(self, upper_bound: float, block_size: int):
         self.block_size = block_size
         self._upper_bound = upper_bound
-        self.root = BlockTreeNode(upper_bound)
+        self.root = Node(upper_bound)
 
     def is_empty(self):
         return not self.root.entries
 
-    def _insert(self, node: BlockTreeNode, parent: BlockTreeNode, dir: Direction):
+    def _insert(self, node: Node, parent: Node, direction: Direction):
         node.colour = Colour.RED
         node.parent = parent
 
-        # the simplest case is that the parent is empty and we add at the root
+        # the simplest case is that the parent is empty and we add at the root.
         # we should never hit this case since insert() already accounts for it,
         # but it doesn't hurt to have this as a backstop/for future use
         if parent is None:
             self.root = node
             return
 
-        parent.set_child(dir, node)
+        parent.set_child(direction, node)
 
         # rebalance the tree iteratively
-        while node is not None:
+        while parent is not None:
             # the next simplest case - if we already adhere to the tree
             # invariant, no need to do anything else
-            if parent.colour is Colour.BLACK:
+            if parent.colour == Colour.BLACK:
                 return
 
             # if the parent is the root, set its colour to black and we're done
@@ -76,23 +95,23 @@ class BlockTree:
                 parent.colour = Colour.BLACK
                 return
 
-            dir = parent.get_direction()
-            uncle = grandparent.get_child(Direction(1 - dir))
+            direction = parent.get_direction()
+            uncle = grandparent.get_child(Direction(1 - direction))
 
             # if the uncle is null, we can rotate the subtree such that the
             # parent and grandparent swap levels, reducing the tree size.
             # if the parent and uncle are different colours, we correct the
             # tree invariant by rotating the parent up and the uncle down
-            if uncle is None or uncle.colour is Colour.BLACK:
+            if uncle is None or uncle.colour == Colour.BLACK:
                 # if the inserted value is between the parent and grandparent,
                 # we do an extra rotation to swap them
-                if node == parent.get_child(Direction(1 - dir)):
-                    self._rotate_subtree(parent, dir)
+                if node == parent.get_child(Direction(1 - direction)):
+                    self._rotate_subtree(parent, direction)
                     node = parent
-                    parent = grandparent.get_child(dir)
+                    parent = grandparent.get_child(direction)
                 # rotate the subtree starting at the inserted node's
                 # grandparent to balance the tree
-                self._rotate_subtree(grandparent, Direction(1 - dir))
+                self._rotate_subtree(grandparent, Direction(1 - direction))
                 parent.colour = Colour.BLACK
                 grandparent.colour = Colour.RED
                 return
@@ -116,13 +135,13 @@ class BlockTree:
     #   elements, including the elements already deleted.) After the split, we make
     #   the appropriate changes in the binary search tree of upper bounds in
     #   O(max{1, log(N/M)}) time.
-    def _split(self, block: BlockTreeNode):
+    def _split(self, block: Node):
         ordered_values = sorted(block.entries.items(), key=lambda item: item[1])
         median_index = ordered_values // 2
         # split the block into two nodes, S′ and S, where S is the original
         # node. S retains the right half of the ordered set of values in the
         # block, so keeps the same upper bound and position in the tree
-        left = BlockTreeNode()
+        left = Node()
 
         for i, entry in enumerate(ordered_values):
             node, path_length = entry
@@ -151,7 +170,7 @@ class BlockTree:
                 parent = parent.right
             self._insert(left, parent, Direction.RIGHT)
 
-    def search(self, value: int) -> BlockTreeNode:
+    def search(self, value: int) -> Node:
         """Returns the node with the smallest upper bound greater than value"""
         node = self.root
         while True:
@@ -164,8 +183,8 @@ class BlockTree:
             else:
                 return None
 
-    def min(self) -> BlockTreeNode:
-        node = self.root
+    def smallest(self, node: Node = None) -> Node:
+        node = node or self.root
         while node.left is not None:
             node = node.left
         return node
@@ -186,29 +205,122 @@ class BlockTree:
     def insert(self, key, value):
         block = self.search(value)
         if block is None:
-            block = BlockTreeNode(math.inf)
-            self.root = block
+            self.root = Node(math.inf)
         if key in block.entries and value >= block.entries[key]:
             return  # if this is a less optimal path, don't store it
         block.entries[key] = value
         if len(block.entries) > self.block_size:
             self._split(block)
 
-    def remove(self, block: BlockTreeNode) -> BlockTreeNode:
-        """Remove the given block and rebalance the tree"""
-        # TODO
+    def remove(self, node: Node) -> Node:
+        """Remove the given node and rebalance the tree"""
+        if node is None:
+            return
 
-    def _rotate_subtree(self, root: BlockTreeNode, dir: Direction):
+        direction = node.get_direction()
+        parent = node.parent
+
+        # node has 2 non-null children, swap with the next largest value, the
+        # leftmost child of this node's right child, then remove it
+        if node.left is not None and node.right is not None:
+            next_node = self.smallest(node.right)
+            if parent is None:
+                self.root = next_node
+            else:
+                parent.set_child(direction, next_node)
+            self.remove(next_node)
+            return
+
+        # node has 1 child. simply replace with its child and colour it black
+        if node.left is not None or node.right is not None:
+            child = node.left or node.right
+            if parent is None:
+                self.root = child
+            else:
+                parent.set_child(direction, child)
+            child.colour = Colour.BLACK
+            return
+
+        # node's children are both null
+
+        # if this is the root, reset the tree
+        if parent is None:
+            self.root = Node(math.inf)
+            return
+
+        # otherwise, remove the child
+        parent.set_child(direction, None)
+        # if the removed node is a red leaf, we don't need to do anything else
+        if node.colour == Colour.RED:
+            return
+
+        distant_nephew: Node = None
+
+        while parent is not None:
+            sibling = parent.get_child(Direction(1 - direction))
+            close_nephew = sibling.get_child(direction)
+
+            if sibling.colour == Colour.RED:
+                self._rotate_subtree(parent, direction)
+                parent.colour = Colour.RED
+                sibling.colour = Colour.BLACK
+                sibling = close_nephew
+
+                distant_nephew = sibling.get_child(Direction(1 - direction))
+                if distant_nephew and distant_nephew.colour == Colour.RED:
+                    break
+                close_nephew = sibling.get_child(direction)
+                if close_nephew and close_nephew.colour == Colour.RED:
+                    break
+
+                sibling.colour = Colour.RED
+                parent.colour = Colour.BLACK
+                return
+
+            if distant_nephew and distant_nephew.colour == Colour.RED:
+                break
+
+            if close_nephew and close_nephew.colour == Colour.RED:
+                break
+
+            if parent.colour == Colour.RED:
+                sibling.colour = Colour.RED
+                parent.colour = Colour.BLACK
+                return
+
+            sibling.colour = Colour.RED
+            node = parent
+
+            parent = node.parent
+            direction = node.get_direction()
+
+        if parent is None:
+            return
+
+        if (distant_nephew is None or distant_nephew.colour == Colour.BLACK
+                and close_nephew and close_nephew.colour == Colour.BLACK):
+            self._rotate_subtree(sibling, Direction(1 - direction))
+            sibling.colour = Colour.RED
+            close_nephew.colour = Colour.BLACK
+            distant_nephew = sibling
+            sibling = close_nephew
+
+        self._rotate_subtree(parent, direction)
+        sibling.colour = parent.colour
+        parent.colour = Colour.BLACK
+        distant_nephew.colour = Colour.BLACK
+
+    def _rotate_subtree(self, root: Node, direction: Direction):
         sub_parent = root.parent
-        new_root = root.get_child(Direction(1 - dir))
-        new_child = new_root.get_child(dir)
+        new_root = root.get_child(Direction(1 - direction))
+        new_child = new_root.get_child(direction)
 
-        root.set_child(Direction(1 - dir), new_child)
+        root.set_child(Direction(1 - direction), new_child)
 
         if new_child is not None:
             new_child.parent = root
 
-        new_root.set_child(dir, root)
+        new_root.set_child(direction, root)
 
         new_root.parent = sub_parent
         root.parent = new_root
@@ -220,14 +332,17 @@ class BlockTree:
 
         return new_root
 
+    def clear(self):
+        self.root = Node(self._upper_bound)
 
-class NodeStore:
+
+class PathStore:
 
     def __init__(self, upper_bound: float, block_size: int):
         self.block_size = block_size
         self._upper_bound = upper_bound
         # use a deque to hold blocks so we can prepend in O(1)
-        self.batch_blocks = []
+        self.batch_entries = []
         self.block_tree = BlockTree(upper_bound)
         self._counter = itertools.count()
 
@@ -250,44 +365,44 @@ class NodeStore:
         #
         # Second, we need a boundary value in order to sort L in with existing
         #   blocks. This means we need to walk each of the O(L/M) blocks and
-        #   find the maximum value, which is O(L)
+        #   find the maximum value, which is O(L). pull remains O(M)
         #
-        # The time complexity ends up being O(L^2 log(L/M) log(n))
-        # This can be reduced to O(L log(L/M) log(n)) with pointer slices
-        if not nodes:
-            return
-
-        if len(nodes) <= self.block_size:
-            # FIXME: this assumes nodes is a list of (b, a) tuples where b is
-            #   the value and a is the node key
-            block = (max(nodes)[0], next(self._counter), nodes)
-            heapq.heappush(self.batch_blocks, block)
-        else:
-            # M = 3
-            # -> (1, 2, 3, 4, 5, 6, 7, 8, 9)
-            # L = 9
-            # L/M = 3 passes  <-- is this possible in python? seems like we'd
-            #                     need to copy the data/iterate over the list
-            #                     which is O(L)
-            #                     probably only possible with pointers; e.g. Go
-            #                     slice is constant time
-            # ⌈M/2⌉ = 2 elements per block
-            # = 5 blocks
-            #
-            # (1, 2, 3, 4, 5) , (6, 7, 8, 9)
-            #
-            # (1, 2, 3) , (4, 5) , (6, 7) , (8, 9)
-            # (1, 2) , (3) , (4, 5) , (6, 7) , (8, 9)
-            #
-            max_nodes = math.ceil(self.block_size / 2)
-
-            # XXX: this isn't optimal as we have to copy the list on each
-            # bisection; for improved performance this will need to be written
-            # in a language with constant time slicing (where slices are views
-            # on the underlying array)
-            for batch in batch_bisect(nodes, max_nodes):
-                block = (max(batch)[0], next(self._counter), batch)
-                heapq.heappush(self.batch_blocks, block)
+        # Finally, L may contain elements with path smaller than another
+        #   block's upper bound, but greater than its smallest entry. In this
+        #   case, we'd need another O(log(n)) to peek each block, pushing the
+        #   rightmost nodes from L until max(L) <= min(S) where S is the next largest block
+        #
+        # Given
+        #
+        # M = 3
+        # D0 = [(2, 3), (4, 5, 6)]
+        # L -> (1, 2, 3, 4, 5)
+        #
+        # we would want to end up with
+        #
+        # D0 = [(1, 2), (2, 3), (4, 4), (5, 5, 6)]
+        #
+        # which seems highly inefficient. It may make more sense to just use a
+        # heap, in which case the time complexity becomes O(L log(n)) where n
+        # is the heap size
+        #
+        # for entry u ∈ L -> O(L)
+        #   find the smallest bound b ∈ D0 >= u -> O(log(n))
+        #   push entry to that block, then split if > M -> O(log(n))
+        #
+        # VS heap impl,
+        #
+        # for entry u ∈ L -> O(L)
+        #   minheap insert -> O(log n))
+        #
+        # popping entries in pull() is slower (O(M)) but shouldn't affect the
+        # overall runtime complexity of the function
+        #
+        # Given the issues above, just implement as a min-heap for now
+        #
+        for node in nodes:
+            entry = (node[0], next(self._counter), node)
+            heapq.heappush(self.batch_entries, entry)
 
     # Delete(a, b) To delete the key/value pair ⟨a, b⟩, we remove it directly from
     #   the linked list, which can be done in O(1) time (?). Note that it’s
@@ -340,38 +455,26 @@ class NodeStore:
         s0 = set()
         s1 = set()
 
-        while self.batch_blocks and len(s0) < self.block_size:
-            _, _, block = heapq.heappop(self.batch_blocks)
-            s0 |= set(block)
+        while self.batch_entries and len(s0) < self.block_size:  # O(M)
+            _, _, entry = heapq.heappop(self.batch_entries)
+            s0.add(entry)
 
         while not self.block_tree.is_empty() and len(s1) < self.block_size:
             # pop the block with the smallest upper bound
-            block = self.block_tree.remove(self.block_tree.min())
-            s1 |= {(v, k) for k, v in block.entries}
+            block = self.block_tree.remove(self.block_tree.smallest())
+            s1 |= {(v, k) for k, v in block.entries}  # O(max{M, log(n)})
 
         s = s0 | s1
 
         if len(s) > self.block_size:
             # XXX: sorted based on lexicographical ordering of (b, a) tuples
-            s = set(sorted(list(s))[:self.block_size])
+            s = set(sorted(list(s))[:self.block_size])  # O(M)
             # push back any values that aren't being returned
             # by taking the difference of si and s
-            self.batch_prepend(list(s0 - s))
-            [self.insert(k, v) for v, k in s1 - s]
+            self.batch_prepend(list(s0 - s))  # O(M log(n))
+            [self.insert(k, v) for v, k in s1 - s]  # O(M log(n))
 
-        # XXX: this way of pulling the lower bound is very janky, it would be
-        #   nicer to have a class wrapper around the batch_prepend blocks to
-        #   make this and some of the other batch operations more readable
-        smallest_batch_block = self.batch_blocks[0][-1]
-        d0_min = min(smallest_batch_block)[0]
-        d1_min = min(self.block_tree.min().entries.values())
+        d0_min = self.batch_entries[0][0]
+        d1_min = min(self.block_tree.smallest().entries.values())
         lower_bound = min(d0_min, d1_min)
         return lower_bound, s
-
-
-def batch_bisect(batch: list, size: int):
-    if len(batch) <= size:
-        return [batch]
-
-    mid = math.ceil(len(batch) / 2)
-    return batch_bisect(batch[mid:], size) + batch_bisect(batch[:mid], size)
