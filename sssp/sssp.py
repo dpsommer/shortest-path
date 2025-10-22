@@ -11,22 +11,36 @@ import networkx as nx
 
 from .pathstore import PathStore
 
-REMOVED = '<removed-node>'
+REMOVED = "<removed-node>"
 
 
 class UnsortedShortestPaths:
 
-    def __init__(self, graph: nx.Graph, degree: int, weight_key='weight'):
+    def __init__(self, graph: nx.Graph, weight_key="weight"):
         self.graph = graph
-        self.steps = math.floor(math.pow(math.log2(degree), 1/3))
-        self._t = math.floor(math.pow(math.log2(degree), 2/3))
+        self._vertex_count = graph.number_of_nodes()
+        self.steps = math.floor(math.pow(math.log2(self._vertex_count), 1/3))
+        # XXX: need a better name for this value
+        self._t = math.floor(math.pow(math.log2(self._vertex_count), 2/3))
         self._weight_key = weight_key
-        self._distances = defaultdict(math.inf)
+        self._distances = defaultdict(lambda: math.inf)
         self._predecessors = {}
 
     def shortest_path(self, u, v):
         self._distances[u] = 0
-        # TODO
+        level = math.ceil(math.log2(self._vertex_count) / self._t)
+        # l = ⌈(log n)/t⌉, B = ∞, S = {s}
+        self.bmssp(level, math.inf, {u})
+        print(f"Shortest path length: {self._distances[v]}")
+        path = [v]
+        next_node = v
+        while True:
+            next_node = self._predecessors[next_node]
+            path.append(next_node)
+            if next_node == u:
+                break
+        print(f"Path: {path[::-1]}")
+
 
     # function FindPivots(B, S)
     # • requirement: for every incomplete vertex v with d(v) < B, the shortest
@@ -62,28 +76,31 @@ class UnsortedShortestPaths:
 
             # walk the edges we found and relax if we find a shorter path
             for (u, v, w) in edges:
-                path_distance = self._distances[u] + w
-                if path_distance <= self._distances[v]:
-                    self._distances[v] = path_distance
-                    # TODO: currently not doing anything with this
+                path_length = self._distances[u] + w
+                if path_length <= self._distances[v]:
+                    self._distances[v] = path_length
+                    # update shortest path tree
                     self._predecessors[v] = u
-                    if path_distance < upper_bound:
+                    if path_length < upper_bound:
                         step_vertices[i].add(v)
-                    # for each edge (u, v) in the broader graph, we create a forest
-                    # of nodes such that u, v ∈ potential_vertices and
-                    # distances[v] = distances[u] + weight(u, v) <- relaxed edge
+                    # for each edge (u, v) in the broader graph, we create a
+                    # forest of nodes such that u, v ∈ potential_vertices and
+                    # dist[v] = dist[u] + weight(u, v) <- relaxed edge
                     # XXX: should this be global to the algorithm run?
                     subgraph_forest.add_edge(u, v, weight=w)
 
-            # add all potential vertices (destination nodes of shortest paths) from
-            # this step to the return set. then, if the count of potential vertices
-            # exceeds steps * |W| > k|S|
-            potential_vertices.union(step_vertices[i])
+            # add all potential vertices (destination nodes of shortest paths)
+            # from this step to the return set. then, if the count of potential
+            # vertices exceeds steps * |W| > k|S|
+            potential_vertices |= step_vertices[i]
             if len(potential_vertices) > (self.steps * len(vertices)):
                 return vertices, potential_vertices
-        # FIXME: need a way to maintain a lookup of tree sizes rather than having
-        # to run dfs on every subtree each call
-        pivots = {u for u in vertices if len(nx.dfs_tree(subgraph_forest, u).nodes) >= self.steps}
+        # FIXME: would be better to maintain a lookup of tree sizes rather than
+        # having to run dfs on every subtree each call
+        pivots = {
+            u for u in potential_vertices
+            if len(nx.dfs_tree(subgraph_forest, u).nodes) >= self.steps
+        }
         return pivots, potential_vertices
 
 
@@ -134,7 +151,7 @@ class UnsortedShortestPaths:
         # frontier is the set of nodes with path lengths less than the
         # determined upper bound to be returned to the bounded
         # multi-source single path function for the next step
-        frontier = set(source_node)
+        frontier = {source_node}
 
         # run a miniature Dijkstra's on the first k steps of the search
         # to build a subset of frontier nodes
@@ -196,12 +213,12 @@ class UnsortedShortestPaths:
         if level == 0:
             return self._bmssp_base_case(upper_bound, vertices)
         pivots, dests = self.find_pivots(upper_bound, vertices)
-        store = PathStore(upper_bound, math.pow(2, (level-1)*self._t))
+        store = PathStore(upper_bound, int(math.pow(2, (level-1)*self._t)))
 
         next_bound = upper_bound
-        for k, v in pivots:
-            store.insert(k, v)
-            next_bound = min(v, next_bound)
+        for node in pivots:
+            store.insert(node, self._distances[node])
+            next_bound = min(self._distances[node], next_bound)
 
         i = 0
         paths = set()
@@ -231,5 +248,5 @@ class UnsortedShortestPaths:
         return bound, paths
 
 
-def shortest_path(graph: nx.Graph, s, d, n, weight_key='weight'):
-    return UnsortedShortestPaths(graph, n, weight_key).shortest_path(s, d)
+def shortest_path(graph: nx.Graph, src, dest, weight_key="weight"):
+    return UnsortedShortestPaths(graph, weight_key).shortest_path(src, dest)

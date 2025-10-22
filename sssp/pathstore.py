@@ -109,7 +109,7 @@ class BlockTree(RedBlackTree):
 
     def clear(self):
         self._node_count = 0
-        self.root = Node(self._upper_bound)
+        self.root = Block(self._upper_bound)
 
 
 class PathStore:
@@ -121,8 +121,14 @@ class PathStore:
         self._counter = itertools.count()
         self._removed_entries = {}
 
+    def size(self) -> int:
+        return len(self.batch_entries) + self.block_tree.size()
+
+    def __len__(self):
+        return self.size()
+
     def is_empty(self):
-        return len(self.batch_entries) > 0 or self.block_tree.size() > 0
+        return self.size() == 0
 
     def insert(self, key, value):
         self.block_tree.insert(key, value)
@@ -256,8 +262,9 @@ class PathStore:
 
         while not self.block_tree.is_empty() and len(s1) < self.block_size:
             # pop the block with the smallest upper bound
-            block = self.block_tree.remove(self.block_tree.smallest())
-            s1 |= {(v, k) for k, v in block.entries}  # O(max{M, log(n)})
+            block = self.block_tree.smallest()
+            self.block_tree.remove(block)
+            s1 |= {(v, k) for k, v in block.entries.items()}  # O(max{M, log(n)})
 
         s = s0 | s1
 
@@ -269,7 +276,8 @@ class PathStore:
             self.batch_prepend(list(s0 - s))  # O(M log(n))
             [self.insert(k, v) for v, k in s1 - s]  # O(M log(n))
 
-        d0_min = self.batch_entries[0][0]
-        d1_min = min(self.block_tree.smallest().entries.values())
+        d0_min = self.batch_entries[0][0] if self.batch_entries else math.inf
+        min_block = self.block_tree.smallest()
+        d1_min = min(min_block.entries.values()) if min_block else math.inf
         lower_bound = min(d0_min, d1_min)
-        return lower_bound, s
+        return lower_bound, {k for _, k in s}
