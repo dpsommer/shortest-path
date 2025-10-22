@@ -9,14 +9,17 @@ from typing import List, Tuple
 
 import networkx as nx
 
+from .pathstore import PathStore
+
 REMOVED = '<removed-node>'
 
 
 class UnsortedShortestPaths:
 
-    def __init__(self, graph: nx.Graph, steps: int, weight_key='weight'):
+    def __init__(self, graph: nx.Graph, degree: int, weight_key='weight'):
         self.graph = graph
-        self.steps = steps
+        self.steps = math.floor(math.pow(math.log2(degree), 1/3))
+        self._t = math.floor(math.pow(math.log2(degree), 2/3))
         self._weight_key = weight_key
         self._distances = defaultdict(math.inf)
         self._predecessors = {}
@@ -151,7 +154,7 @@ class UnsortedShortestPaths:
                 if v in node_index:
                     # "decrease" the priority value. due to python's heapq
                     # implementation not supporting priority modification,
-                    # we use the workaround suggested in the documentation:
+                    # use lazy deletion to avoid breaking the heap invariant
                     # https://docs.python.org/3/library/heapq.html#priority-queue-implementation-notes
                     node_index[v][-1] = REMOVED
                 heapq.heappush(q, entry)
@@ -189,12 +192,44 @@ class UnsortedShortestPaths:
     #               K ← K ∪ {⟨v, d[u] + w(u,v)⟩}
     #   D.BatchPrepend(K ∪ {⟨x, d[x]⟩ : x ∈ Si and d[x] ∈ [B′i, Bi)})
     # return B′ ← min{B′i, B}; U ← U ∪ {x ∈ W : d[x] < B′}
-    def bmssp(self, upper_bound: float, vertices: set, level: int) -> Tuple[float, set]:
+    def bmssp(self, level: int, upper_bound: float, vertices: set) -> Tuple[float, set]:
         if level == 0:
             return self._bmssp_base_case(upper_bound, vertices)
         pivots, dests = self.find_pivots(upper_bound, vertices)
+        store = PathStore(upper_bound, math.pow(2, (level-1)*self._t))
+
+        next_bound = upper_bound
+        for k, v in pivots:
+            store.insert(k, v)
+            next_bound = min(v, next_bound)
+
+        i = 0
+        paths = set()
+        size_bound = self.steps * math.pow(2, level * self._t)
+        store_min = upper_bound
+
+        while len(paths) < size_bound and not store.is_empty():
+            i += 1
+            store_min, shortest_paths = store.pull()
+            next_bound, s = self.bmssp(level - 1, store_min, shortest_paths)
+            paths |= s
+            batch = []
+
+            for node in s:
+                for (u, v, w) in self.graph.edges(node, data=self._weight_key):
+                    path_length = self._distances[u] + w
+                    if path_length <= self._distances[v]:
+                        self._distances[v] = path_length
+                        if next_bound >= path_length < upper_bound:
+                            store.insert(v, path_length)
+                        elif store_min >= path_length < next_bound:
+                            batch.append((path_length, v))
+            store.batch_prepend(batch)
+
+        bound = min(store_min, upper_bound)
+        paths |= {x for x in dests if self._distances[x] < bound}
+        return bound, paths
 
 
-
-def shortest_path(graph: nx.Graph, s, d, k=4, weight_key='weight'):
-    return UnsortedShortestPaths(graph, k, weight_key).shortest_path(s, d)
+def shortest_path(graph: nx.Graph, s, d, n, weight_key='weight'):
+    return UnsortedShortestPaths(graph, n, weight_key).shortest_path(s, d)
