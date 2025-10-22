@@ -138,8 +138,6 @@ class RedBlackTree:
         if node is None:
             return
 
-        self._node_count -= 1
-
         direction = node.get_direction()
         parent = node.parent
 
@@ -153,6 +151,8 @@ class RedBlackTree:
                 parent.set_child(direction, next_node)
             self.remove(next_node)
             return
+
+        self._node_count -= 1
 
         # node has 1 child. simply replace with its child and colour it black
         if node.left is not None or node.right is not None:
