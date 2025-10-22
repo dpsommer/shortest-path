@@ -1,3 +1,7 @@
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
 [project]
 name = "sssp"
 authors = [
@@ -10,6 +14,7 @@ classifiers = [
   "Programming Language :: Python :: 3",
   "Operating System :: OS Independent",
 ]
+dynamic = ["version"]
 
 [project.urls]
 Homepage = "https://github.com/dpsommer/shortest-path"
@@ -21,6 +26,20 @@ addopts = "-ra -q -p no:warnings"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
+
+[tool.hatch]
+version.source = "vcs"
+build.hooks.vcs.version-file = "sssp/version.py"
+
+[tool.hatch.version.raw-options]
+local_scheme = "no-local-version"
+
+[tool.hatch.build.targets.wheel]
+packages = ["sssp"]
+
+[tool.hatch.build.targets.sdist]
+include = ["sssp/*.py", "/tests"]
+exclude = ["/.trunk"]
 
 [tool.bandit.assert_used]
 skips = ["**/*_test.py", "**/test_*.py"]
