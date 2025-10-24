@@ -1,6 +1,7 @@
 # implementation of https://arxiv.org/pdf/2504.17033 using networkx
 #
 # pseudocode and header comments are verbatim from the paper for the most part
+import copy
 import heapq
 import itertools
 import math
@@ -17,18 +18,22 @@ REMOVED = "<removed-node>"
 class UnsortedShortestPaths:
 
     def __init__(self, graph: nx.Graph, weight_key="weight"):
-        self.graph = graph
-        self._vertex_count = graph.number_of_nodes()
-        self.steps = math.floor(math.pow(math.log2(self._vertex_count), 1/3))
-        # XXX: need a better name for this value
-        self._t = math.floor(math.pow(math.log2(self._vertex_count), 2/3))
         self._weight_key = weight_key
+        self._node_mapping = {}
+        self.graph = self._normalize(graph)
+        self._vertex_count = self.graph.number_of_nodes()
+        self.steps = math.floor(math.pow(math.log(self._vertex_count), 1/3))
+        # XXX: need a better name for this value
+        self._t = math.floor(math.pow(math.log(self._vertex_count), 2/3))
         self._distances = defaultdict(lambda: math.inf)
         self._predecessors = {}
 
     def shortest_path(self, u, v):
+        u = self._node_mapping[u]
+        v = self._node_mapping[v]
+
         self._distances[u] = 0
-        level = math.ceil(math.log2(self._vertex_count) / self._t)
+        level = math.ceil(math.log(self._vertex_count) / self._t)
         # l = ⌈(log n)/t⌉, B = ∞, S = {s}
         self.bmssp(level, math.inf, {u})
         print(f"Shortest path length: {self._distances[v]}")
@@ -41,6 +46,34 @@ class UnsortedShortestPaths:
                 break
         print(f"Path: {path[::-1]}")
 
+    def _normalize(self, graph: nx.Graph) -> nx.Graph:
+        G = nx.DiGraph()
+        counter = itertools.count()
+        max_degree = max(graph.degree, key=lambda x: x[1])[1] + 1
+        x = defaultdict(lambda: next(counter))
+
+        # Create a new graph composed of a constant-degree cycle for each
+        #   vertex v in G and its neighbours
+        for u in graph.nodes:
+            nodes = [x[u]]
+            for v in graph.neighbors(u):
+                nodes.append(x[v])
+            # pad nod list so all nodes have matching in/out degrees
+            while len(nodes) < max_degree:
+                nodes.append(next(counter))
+            for u in nodes:
+                for v in nodes:
+                    if u != v:
+                        G.add_edge(u, v)
+                        G.add_edge(v, u)
+
+        # For every edge (u, v) in G, add a directed edge from vertex x(u, v)
+        #   to x(v, u) with weight w(u, v)
+        for (u, v, w) in graph.edges.data(self._weight_key):
+            G.add_edge(x[u], x[v], **{self._weight_key: w})
+
+        self._node_mapping = x
+        return G
 
     # function FindPivots(B, S)
     # • requirement: for every incomplete vertex v with d(v) < B, the shortest
@@ -63,7 +96,7 @@ class UnsortedShortestPaths:
     # P ← {u ∈ S : u is a root of a tree with ≥ k vertices in F }
     # return P, W
     def find_pivots(self, upper_bound: float, vertices: set) -> Tuple[set, set]:
-        potential_vertices = set()
+        potential_vertices = vertices
         step_vertices: List[set] = [vertices]
         subgraph_forest = nx.Graph()
 
@@ -76,6 +109,9 @@ class UnsortedShortestPaths:
 
             # walk the edges we found and relax if we find a shorter path
             for (u, v, w) in edges:
+                if w is None:
+                    continue
+
                 path_length = self._distances[u] + w
                 if path_length <= self._distances[v]:
                     self._distances[v] = path_length
@@ -87,7 +123,7 @@ class UnsortedShortestPaths:
                     # forest of nodes such that u, v ∈ potential_vertices and
                     # dist[v] = dist[u] + weight(u, v) <- relaxed edge
                     # XXX: should this be global to the algorithm run?
-                    subgraph_forest.add_edge(u, v, weight=w)
+                    subgraph_forest.add_edge(u, v, **{self._weight_key: w})
 
             # add all potential vertices (destination nodes of shortest paths)
             # from this step to the return set. then, if the count of potential
@@ -98,8 +134,9 @@ class UnsortedShortestPaths:
         # FIXME: would be better to maintain a lookup of tree sizes rather than
         # having to run dfs on every subtree each call
         pivots = {
-            u for u in potential_vertices
-            if len(nx.dfs_tree(subgraph_forest, u).nodes) >= self.steps
+            u for u in vertices
+            if u in subgraph_forest
+                and len(nx.dfs_tree(subgraph_forest, u).nodes) >= self.steps
         }
         return pivots, potential_vertices
 
@@ -126,7 +163,7 @@ class UnsortedShortestPaths:
     #   if |U[0]| ≤ k then
     #       return B′ ← B, U ← U[0]
     #   else
-    #       return B′ ← maxv∈U0 d[v], U ← {v ∈ U[0] : d[v] < B′}
+    #       return B′ ← max v ∈ U[0] d[v], U ← {v ∈ U[0] : d[v] < B′}
     def _bmssp_base_case(self, upper_bound: float, vertices: set) -> Tuple[float, set]:
         updated_upper_bound = 0
 
@@ -161,13 +198,18 @@ class UnsortedShortestPaths:
                 continue
 
             frontier.add(u)
-            updated_upper_bound = max(updated_upper_bound, self._distances[u])
 
             for (u, v, w) in self.graph.edges(u, data=self._weight_key):
+                if w is None:
+                    continue
                 path_length = d + w
                 if path_length <= self._distances[v]:
                     self._distances[v] = path_length
+                    # update shortest path tree
+                    self._predecessors[v] = u
+
                 entry = [path_length, next(counter), v]
+
                 if v in node_index:
                     # "decrease" the priority value. due to python's heapq
                     # implementation not supporting priority modification,
@@ -179,7 +221,14 @@ class UnsortedShortestPaths:
 
         if len(frontier) <= self.steps:
             return upper_bound, frontier
-        return updated_upper_bound, {v for v in frontier if self._distances[v] < updated_upper_bound}
+
+        updated_upper_bound = 0
+        for v in frontier:
+            updated_upper_bound = max(updated_upper_bound, self._distances[v])
+
+        return updated_upper_bound, {
+            v for v in frontier if self._distances[v] < updated_upper_bound
+        }
 
     # function BMSSP(l, B, S)
     # • requirement 1: |S| ≤ 2lt
@@ -211,39 +260,56 @@ class UnsortedShortestPaths:
     # return B′ ← min{B′i, B}; U ← U ∪ {x ∈ W : d[x] < B′}
     def bmssp(self, level: int, upper_bound: float, vertices: set) -> Tuple[float, set]:
         if level == 0:
-            return self._bmssp_base_case(upper_bound, vertices)
-        pivots, dests = self.find_pivots(upper_bound, vertices)
-        store = PathStore(upper_bound, int(math.pow(2, (level-1)*self._t)))
+            return self._bmssp_base_case(upper_bound, copy.copy(vertices))
+        pivots, dests = self.find_pivots(upper_bound, copy.copy(vertices))
+        block_size = int(math.pow(2, (level-1)*self._t))
+        store = PathStore(upper_bound, block_size)
 
         next_bound = upper_bound
         for node in pivots:
             store.insert(node, self._distances[node])
             next_bound = min(self._distances[node], next_bound)
 
-        i = 0
         paths = set()
         size_bound = self.steps * math.pow(2, level * self._t)
         store_min = upper_bound
 
         while len(paths) < size_bound and not store.is_empty():
-            i += 1
             store_min, shortest_paths = store.pull()
+            if store_min == math.inf:
+                store_min = upper_bound
             next_bound, s = self.bmssp(level - 1, store_min, shortest_paths)
             paths |= s
             batch = []
 
             for node in s:
                 for (u, v, w) in self.graph.edges(node, data=self._weight_key):
+                    if w is None:
+                        continue
                     path_length = self._distances[u] + w
                     if path_length <= self._distances[v]:
                         self._distances[v] = path_length
-                        if next_bound >= path_length < upper_bound:
+                        # update shortest path tree
+                        self._predecessors[v] = u
+
+                        if store_min <= path_length < upper_bound:
                             store.insert(v, path_length)
-                        elif store_min >= path_length < next_bound:
-                            batch.append((path_length, v))
+                        elif next_bound <= path_length < store_min:
+                            batch.append((v, path_length))
+
+            for node in shortest_paths:
+                path_length = self._distances[node]
+                # minor but important correction here:
+                #
+                # D.BatchPrepend(K ∪ {⟨x, d[x]⟩ : x ∈ Si and d[x] ∈ [B′i, Bi)})
+                #
+                # the bounds for d[x] need to be (B′i, Bi) to avoid an infinite
+                # loop when d[x] == B′i
+                if next_bound < path_length < store_min:
+                    batch.append((node, path_length))
             store.batch_prepend(batch)
 
-        bound = min(store_min, upper_bound)
+        bound = min(next_bound, upper_bound)
         paths |= {x for x in dests if self._distances[x] < bound}
         return bound, paths
 
