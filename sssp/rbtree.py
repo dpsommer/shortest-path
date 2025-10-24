@@ -1,9 +1,10 @@
+import copy
 import enum
-import math
 from typing import Optional
 
 
 class Direction(enum.IntEnum):
+    ROOT = -1
     LEFT = 0
     RIGHT = 1
 
@@ -19,7 +20,7 @@ class Node:
         self.parent: Optional[Node] = None
         self.right: Optional[Node] = None
         self.left: Optional[Node] = None
-        self.colour = Colour.BLACK
+        self.colour = Colour.RED
         self.value = value
 
     def get_child(self, direction: Direction):
@@ -33,31 +34,24 @@ class Node:
         else:
             self.right = node
 
-    def get_direction(self) -> Optional[Direction]:
+    def get_direction(self) -> Direction:
         if self.parent is None:
-            return None
+            return Direction.ROOT
         return Direction.LEFT if self == self.parent.left else Direction.RIGHT
+
+    def replace(self, node: "Node"):
+        self.value = node.value
 
 
 class RedBlackTree:
 
     def __init__(self):
-        # keep track internally of the node count
-        self._node_count = 0
         self.root = None
 
     def is_empty(self):
         return not self.root
 
-    def size(self):
-        return self._node_count
-
-    def __len__(self):
-        return self.size()
-
     def insert(self, node: Node, parent: Node, direction: Direction):
-        self._node_count += 1
-
         node.colour = Colour.RED
         node.parent = parent
 
@@ -145,22 +139,32 @@ class RedBlackTree:
         # leftmost child of this node's right child, then remove it
         if node.left is not None and node.right is not None:
             next_node = self.smallest(node.right)
+
+            clone = copy.copy(node)
+            clone.replace(next_node)
+            clone.colour = node.colour
+            clone.left = node.left
+            clone.right = node.right
+
+            node.left.parent = clone
+            node.right.parent = clone
+
             if parent is None:
-                self.root = next_node
+                self.root = clone
             else:
-                parent.set_child(direction, next_node)
+                parent.set_child(direction, clone)
+
             self.remove(next_node)
             return
 
-        self._node_count -= 1
-
-        # node has 1 child. simply replace with its child and colour it black
+        # node has 1 child. replace with its child and colour it black
         if node.left is not None or node.right is not None:
             child = node.left or node.right
             if parent is None:
                 self.root = child
             else:
                 parent.set_child(direction, child)
+            child.parent = parent
             child.colour = Colour.BLACK
             return
 
@@ -182,6 +186,7 @@ class RedBlackTree:
         while parent is not None:
             sibling = parent.get_child(Direction(1 - direction))
             close_nephew = sibling.get_child(direction)
+            distant_nephew = sibling.get_child(Direction(1 - direction))
 
             if sibling.colour == Colour.RED:
                 self._rotate_subtree(parent, direction)
@@ -221,7 +226,7 @@ class RedBlackTree:
             return
 
         if (distant_nephew is None or distant_nephew.colour == Colour.BLACK
-                and close_nephew and close_nephew.colour == Colour.BLACK):
+                and close_nephew and close_nephew.colour == Colour.RED):
             self._rotate_subtree(sibling, Direction(1 - direction))
             sibling.colour = Colour.RED
             close_nephew.colour = Colour.BLACK
@@ -233,22 +238,22 @@ class RedBlackTree:
         parent.colour = Colour.BLACK
         distant_nephew.colour = Colour.BLACK
 
-    def _rotate_subtree(self, root: Node, direction: Direction):
-        sub_parent = root.parent
-        new_root = root.get_child(Direction(1 - direction))
+    def _rotate_subtree(self, sub: Node, direction: Direction):
+        sub_parent = sub.parent
+        new_root = sub.get_child(Direction(1 - direction))
         new_child = new_root.get_child(direction)
 
-        root.set_child(Direction(1 - direction), new_child)
+        sub.set_child(Direction(1 - direction), new_child)
 
         if new_child is not None:
-            new_child.parent = root
+            new_child.parent = sub
 
-        new_root.set_child(direction, root)
+        new_root.set_child(direction, sub)
 
         new_root.parent = sub_parent
-        root.parent = new_root
+        sub.parent = new_root
         if sub_parent is not None:
-            d = Direction.RIGHT if root == sub_parent.right else Direction.LEFT
+            d = Direction.RIGHT if sub == sub_parent.right else Direction.LEFT
             sub_parent.set_child(d, new_root)
         else:
             self.root = new_root
@@ -256,5 +261,18 @@ class RedBlackTree:
         return new_root
 
     def clear(self):
-        self._node_count = 0
         self.root = None
+
+    def height(self, node: Node) -> int:
+        if node is None:
+            return -1
+        return 1 + max(self.height(node.left), self.height(node.right))
+
+    def pprint(self, node: Node, depth=0):
+        if node is None:
+            return "\t" * depth + "|_ null\n"
+        # recursively draw a tree
+        direction = node.get_direction()
+        return ("\t" * depth + f"|_ {direction.name} | {node.value}: {node.colour}\n"
+                + self.pprint(node.left, depth + 1)
+                + self.pprint(node.right, depth + 1))
