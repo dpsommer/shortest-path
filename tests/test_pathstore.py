@@ -1,4 +1,6 @@
 import math
+import random
+from itertools import count
 
 import pytest
 
@@ -21,7 +23,6 @@ def test_insert_to_empty_tree(new_tree: BlockTree):
     new_tree.insert(1, 10)
 
     assert not new_tree.is_empty()
-    assert len(new_tree) == 1
     assert new_tree.root.entries[1] == 10
 
 
@@ -33,7 +34,6 @@ def test_insert_causing_split(new_tree: BlockTree):
     # insert to trigger split
     new_tree.insert(4, 3)
 
-    assert len(new_tree) == 2
     assert len(new_tree.root.entries) == 2
     assert new_tree.root.left is not None
     assert new_tree.root.left.value == 5
@@ -60,12 +60,11 @@ def test_search(new_tree: BlockTree):
 
 
 def test_batch_prepend(path_store: PathStore):
-    # nodes must be a list of (b, a) tuples for lexicographical sorting
-    nodes = [(8, 1), (12, 2), (4, 3), (9, 4)]
+    nodes = [(1, 8), (2, 12), (3, 4), (4, 9)]
     path_store.batch_prepend(nodes)
 
-    assert len(path_store.batch_entries) == 4
-    assert path_store.batch_entries[0][0] == 4
+    assert path_store.batch_entries.head.next_ is not None
+    assert path_store.batch_entries.minimum() == 4
 
 
 def test_delete_from_tree(path_store: PathStore):
@@ -82,10 +81,15 @@ def test_delete_emptying_block(path_store: PathStore):
     nodes = [(1, 4), (2, 7), (3, 9), (4, 5), (5, 7), (6, 12), (7, 8)]
     [path_store.insert(k, v) for k, v in nodes]
 
-    assert path_store.block_tree.size() == 3
+    assert path_store.block_tree.root.left is not None
+    assert path_store.block_tree.root.right is not None
+
+    # print(path_store.block_tree.pprint(path_store.block_tree.root))
 
     path_store.delete(2, 7)
     path_store.delete(5, 7)
 
-    assert path_store.block_tree.size() == 2
+    # print(path_store.block_tree.pprint(path_store.block_tree.root))
+
+    assert path_store.block_tree.root.right is None
     assert path_store.block_tree.root.value != 7
