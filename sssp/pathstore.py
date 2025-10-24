@@ -1,15 +1,13 @@
-import heapq
 import itertools
 import math
-from bisect import bisect_left
 
 from .rbtree import Node, RedBlackTree, Direction
 
 
-class Block(Node):
+class Block:
 
-    def __init__(self, upper_bound: float):
-        super().__init__(upper_bound)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.entries = {}
 
     def size(self):
@@ -19,16 +17,128 @@ class Block(Node):
         return self.size()
 
 
+class TreeBlock(Block, Node):
+
+    def __init__(self, upper_bound: float):
+        super().__init__(upper_bound)
+
+    def replace(self, node: "TreeBlock"):
+        super().replace(node)
+        self.entries = node.entries
+
+
+class ListNode:
+
+    def __init__(self, value):
+        self.value = value
+        self.prev: ListNode = None
+        self.next_: ListNode = None
+
+
+class ListBlock(Block, ListNode):
+
+    def __init__(self, upper_bound: float):
+        super().__init__(upper_bound)
+
+
+class BlockList:
+
+    def __init__(self, upper_bound: float, block_size: int):
+        self.block_size = block_size
+        self._upper_bound = upper_bound
+        self.head = ListBlock(upper_bound)
+        self.tail = self.head
+
+    def is_empty(self):
+        return not self.head.entries
+
+    def minimum(self) -> float:
+        if self.is_empty():
+            return math.inf
+        return min(self.head.entries.values())
+
+    def pull(self) -> set:
+        s = set()
+        while not self.is_empty() and len(s) < self.block_size:  # O(M)
+            block = self.popleft()
+            s |= set(block.entries.items())
+        return s
+
+    def pushleft(self, block: ListBlock):
+        self.head.prev = block
+        block.next_ = self.head
+        self.head = block
+
+    def popleft(self) -> ListBlock:
+        popped = self.head
+        self.head = self.head.next_
+        if self.head is None:
+            self._reset()
+        self.head.prev = None
+        return popped
+
+    def _split(self, block: ListBlock):
+        ordered = sorted(block.entries.items(), key=lambda item: item[1])
+        median_index = len(ordered) // 2
+        prev = ListBlock(ordered[median_index - 1][1])
+
+        for i in range(median_index):
+            node, path_length = ordered[i]
+            prev.entries[node] = path_length
+            block.entries.pop(node)
+
+        prev.prev = block.prev
+        prev.next_ = block
+        block.prev = prev
+
+        if prev.prev is not None:
+            prev.prev.next_ = prev
+
+        if block is self.head:
+            self.head = prev
+
+    def insert(self, key, value):
+        larger_block = self.tail
+        block = self.tail.prev
+
+        # XXX: would be faster to bisect here
+        while block is not None:
+            if value > block.value:
+                break
+            larger_block = block
+            block = larger_block.prev
+        larger_block.entries[key] = value
+
+        if len(larger_block.entries) > self.block_size:
+            self._split(larger_block)
+
+    def _reset(self):
+        self.head = ListBlock(self._upper_bound)
+        self.tail = self.head
+
+
 class BlockTree(RedBlackTree):
 
     def __init__(self, upper_bound: float, block_size: int):
         self.block_size = block_size
         self._upper_bound = upper_bound
-        self.root = Block(upper_bound)
-        self._node_count = 1
+        self.root = TreeBlock(upper_bound)
 
     def is_empty(self):
         return not self.root.entries
+
+    def minimum(self) -> float:
+        if self.is_empty():
+            return math.inf
+        return min(self.root.entries.values())
+
+    def pull(self) -> set:
+        s = set()
+        while not self.is_empty() and len(s) < self.block_size:  # O(M)
+            block = self.smallest()
+            self.remove(block)
+            s |= set(block.entries.items())
+        return s
 
     # Split When a block in D1 exceeds M elements, we perform a split. First, we
     #   identify the median element within the block in O(M) time, partitioning the
@@ -40,7 +150,7 @@ class BlockTree(RedBlackTree):
     #   elements, including the elements already deleted.) After the split, we make
     #   the appropriate changes in the binary search tree of upper bounds in
     #   O(max{1, log(N/M)}) time.
-    def _split(self, block: Block):
+    def _split(self, block: TreeBlock):
         ordered_values = sorted(block.entries.items(), key=lambda item: item[1])
         median_index = len(ordered_values) // 2
         # split the block into two nodes, S′ and S, where S is the original
@@ -48,7 +158,7 @@ class BlockTree(RedBlackTree):
         # block, so keeps the same upper bound and position in the tree.
         # set the upper bound value of the new node to the largest
         # path length in the left half of the ordered values
-        left = Block(ordered_values[median_index - 1][1])
+        left = TreeBlock(ordered_values[median_index - 1][1])
 
         for i in range(median_index):
             node, path_length = ordered_values[i]
@@ -57,7 +167,7 @@ class BlockTree(RedBlackTree):
 
         # find the correct parent for the new node
         #
-        # the tree _insert function requires that the node be positioned to
+        # the tree insert function requires that the node be positioned to
         # replace a null node. if the left node is null, we can simply pass the
         # original node S as the parent. otherwise, we need to walk the subtree
         # to the left of S (since ∀b ∈ S : b <= B[S], b > B[U] for all other U)
@@ -71,7 +181,7 @@ class BlockTree(RedBlackTree):
                 parent = parent.right
             super().insert(left, parent, Direction.RIGHT)
 
-    def search(self, value: int) -> Block:
+    def search(self, value: int) -> TreeBlock:
         """Returns the node with the smallest upper bound greater than value"""
         node = self.root
         while True:
@@ -98,105 +208,71 @@ class BlockTree(RedBlackTree):
     #   After an insertion, the size of the block may increase, and if it
     #   exceeds the size limit M, a split operation will be triggered.
     def insert(self, key, value):
+        # XXX: change this function name; currently breaks Liskov substitution
         block = self.search(value)
         if block is None:
-            self.root = Block(math.inf)
+            self.clear()
+            block = self.root
         if key in block.entries and value >= block.entries[key]:
             return  # if this is a less optimal path, don't store it
         block.entries[key] = value
-        if len(block.entries) > self.block_size:
+        if block.size() > self.block_size:
             self._split(block)
 
+    def smallest(self, node: TreeBlock = None) -> TreeBlock:
+        return super().smallest(node)
+
     def clear(self):
-        self._node_count = 0
-        self.root = Block(self._upper_bound)
+        self.root = TreeBlock(self._upper_bound)
+
+    def pprint(self, node: TreeBlock, depth=0):
+        if node is None:
+            return "\t" * depth + "|_ null\n"
+        # recursively draw a tree
+        direction = node.get_direction()
+        return ("\t" * depth + f"|_ {direction.name} | {node.value}: {node.colour} | {node.entries}\n"
+                + self.pprint(node.left, depth + 1)
+                + self.pprint(node.right, depth + 1))
 
 
 class PathStore:
 
     def __init__(self, upper_bound: float, block_size: int):
         self.block_size = block_size
-        self.batch_entries = []
+        self.batch_entries = BlockList(upper_bound, block_size)
         self.block_tree = BlockTree(upper_bound, block_size)
         self._counter = itertools.count()
         self._removed_entries = {}
 
-    def size(self) -> int:
-        return len(self.batch_entries) + self.block_tree.size()
-
-    def __len__(self):
-        return self.size()
-
     def is_empty(self):
-        return self.size() == 0
+        return self.batch_entries.is_empty() and self.block_tree.is_empty()
 
     def insert(self, key, value):
         self.block_tree.insert(key, value)
 
-    # BatchPrepend(L) Let L denote the size of L. When L ≤ M , we simply create a
-    #   new block for L and add it to the beginning of D0. Otherwise, we create
+    # BatchPrepend(S) Let L denote the size of S. When L ≤ M , we simply create a
+    #   new block for S and add it to the beginning of D0. Otherwise, we create
     #   O(L/M) new blocks in the beginning of D0, each containing at most ⌈M/2⌉
     #   elements. We can achieve this by repeatedly taking medians which completes
     #   in O(L log(L/M)) time.
     def batch_prepend(self, nodes: list):
-        # XXX: there are a few issues with the function as described.
-        #
-        # First, the description above doesn't take into account that blocks
-        #   need to be in sorted order, meaning insertion will actually take
-        #   an additional O(log(n)) where n is the number of blocks in D0
-        #
-        # Needing sorted order also means that L itself needs to be sorted
-        #
-        # Second, we need a boundary value in order to sort L in with existing
-        #   blocks. This means we need to walk each of the O(L/M) blocks and
-        #   find the maximum value, which is O(L). pull remains O(M)
-        #
-        # Finally, L may contain elements with path smaller than another
-        #   block's upper bound, but greater than its smallest entry. In this
-        #   case, we'd need another O(log(n)) to peek each block, pushing the
-        #   rightmost nodes from L until max(L) <= min(S) where S is the next
-        #   largest block
-        #
-        # Given
-        #
-        # M = 3
-        # D0 = [(2, 3), (4, 5, 6)]
-        # L -> (1, 2, 3, 4, 5)
-        #
-        # we would want to end up with
-        #
-        # D0 = [(1, 2), (2, 3), (4, 4), (5, 5, 6)]
-        #
-        # which seems highly inefficient. It may make more sense to just use a
-        # heap, in which case the time complexity becomes O(L log(n)) where n
-        # is the heap size
-        #
-        # for entry u ∈ L -> O(L)
-        #   find the smallest bound b ∈ D0 >= u -> O(log(n))
-        #   push entry to that block, then split if > M -> O(log(n))
-        #
-        # VS heap impl,
-        #
-        # for entry u ∈ L -> O(L)
-        #   minheap insert -> O(log n))
-        #
-        # popping entries in pull() is slower (O(M)) but shouldn't affect the
-        # overall runtime complexity of the function
-        #
-        # Given the issues above, just implement as a min-heap for now
-        #
-        for node in nodes:
-            entry = (node[0], next(self._counter), node)
-            heapq.heappush(self.batch_entries, entry)
+        if not nodes:
+            return
 
-    def _batch_entry_index(self, key, value) -> int | None:
-        i = bisect_left(self.batch_entries, value, key=lambda x: x[0])
-        for i in range(i, len(self.batch_entries)):
-            v, k = self.batch_entries[i][2]
-            if v != value:
-                return None # k,v pair doesn't exist in D0 either
-            if k == key:
-                return i
+        smallest_in_head = math.inf
+        largest_value = sorted(nodes)[-1][0]
+
+        if not self.batch_entries.is_empty():
+            head = self.batch_entries.head
+            smallest_in_head = sorted(head.entries.values())[0]
+
+        if len(nodes) <= self.block_size and largest_value <= smallest_in_head:
+            block = ListBlock(largest_value)
+            block.entries = {k: v for k, v in nodes}
+            self.batch_entries.pushleft(block)
+        else:
+            for k, v in nodes:
+                self.batch_entries.insert(k, v)
 
     # Delete(a, b) To delete the key/value pair ⟨a, b⟩, we remove it directly from
     #   the linked list, which can be done in O(1) time (?). Note that it’s
@@ -226,7 +302,7 @@ class PathStore:
         # Still, this is O(log(N/M)) as we always need a search to find B[i]...
         block = self.block_tree.search(value)
         v = block.entries.pop(key, None)
-        if len(block.entries) == 0:
+        if block.size() == 0:
             self.block_tree.remove(block)
         if v is None:  # remove pair from D0
             # lazy delete so we don't need to spend time maintaining the heap
@@ -250,34 +326,17 @@ class PathStore:
     #   set returned value x to the smallest remaining value in D0 ∪ D1, which can
     #   also be found in O(M) time.
     def pull(self):
-        s0 = set()
-        s1 = set()
-
-        while self.batch_entries and len(s0) < self.block_size:  # O(M)
-            _, _, entry = heapq.heappop(self.batch_entries)
-            v, k = entry
-            if self._removed_entries.get(k) == v:
-                continue
-            s0.add(entry)
-
-        while not self.block_tree.is_empty() and len(s1) < self.block_size:
-            # pop the block with the smallest upper bound
-            block = self.block_tree.smallest()
-            self.block_tree.remove(block)
-            s1 |= {(v, k) for k, v in block.entries.items()}  # O(max{M, log(n)})
+        s0 = self.batch_entries.pull()
+        s1 = self.block_tree.pull()
 
         s = s0 | s1
 
         if len(s) > self.block_size:
-            # XXX: sorted based on lexicographical ordering of (b, a) tuples
-            s = set(sorted(list(s))[:self.block_size])  # O(M)
+            s = set(sorted(list(s), key=lambda x: x[1])[:self.block_size])  # O(M)
             # push back any values that aren't being returned
             # by taking the difference of si and s
             self.batch_prepend(list(s0 - s))  # O(M log(n))
-            [self.insert(k, v) for v, k in s1 - s]  # O(M log(n))
+            [self.insert(k, v) for k, v in s1 - s]  # O(M log(n))
 
-        d0_min = self.batch_entries[0][0] if self.batch_entries else math.inf
-        min_block = self.block_tree.smallest()
-        d1_min = min(min_block.entries.values()) if min_block else math.inf
-        lower_bound = min(d0_min, d1_min)
-        return lower_bound, {k for _, k in s}
+        x = min(self.batch_entries.minimum(), self.block_tree.minimum())
+        return x, {k for k, _ in s}
