@@ -24,7 +24,7 @@ class ShortestPath:
         # empty nodes in the normalized graph
         self._edge_graph = nx.DiGraph()
         self.graph = self._normalize(graph)
-        self._vertex_count = graph.number_of_nodes()
+        self._vertex_count = self.graph.number_of_nodes()
         self.steps = math.floor(math.pow(math.log(self._vertex_count), 1/3))
         # XXX: need a better name for this value
         self._t = math.floor(math.pow(math.log(self._vertex_count), 2/3))
@@ -99,12 +99,12 @@ class ShortestPath:
     #       P ← S
     #       return P, W
     # F ← {(u, v) ∈ E : u, v ∈ W, d[v] = d[u] + w(u,v)}
-    # P ← {u ∈ S : u is a root of a tree with ≥ k vertices in F }
+    # P ← {u ∈ S : u is a root of a tree with ≥ k vertices in F}
     # return P, W
     def find_pivots(self, upper_bound: float, vertices: set) -> Tuple[set, set]:
         potential_vertices = vertices
         step_vertices: List[set] = [vertices]
-        subgraph_forest = nx.Graph()
+        forest_trees = defaultdict(set)
 
         # relax edges for k steps
         for i in range(1, self.steps + 1):
@@ -125,10 +125,11 @@ class ShortestPath:
                     self._predecessors[v] = u
                     if path_length < upper_bound:
                         step_vertices[i].add(v)
-                    # for each edge (u, v) in the broader graph, we create a
-                    # forest of nodes such that u, v ∈ potential_vertices and
-                    # dist[v] = dist[u] + weight(u, v) <- relaxed edge
-                    subgraph_forest.add_edge(u, v, **{self._weight_key: w})
+                    # rather than creating a separate forest graph, just cache
+                    # subgraph trees as sets for when we determine pivots
+                    forest_trees[u].add(v), forest_trees[v].add(u)
+                    forest_trees[u] |= forest_trees[v]
+                    forest_trees[v] |= forest_trees[u]
 
             # add all potential vertices (destination nodes of shortest paths)
             # from this step to the return set. then, if the count of potential
@@ -136,13 +137,7 @@ class ShortestPath:
             potential_vertices |= step_vertices[i]
             if len(potential_vertices) > (self.steps * len(vertices)):
                 return vertices, potential_vertices
-        # FIXME: would be better to maintain a lookup of tree sizes rather than
-        # having to run dfs on every subtree each call
-        pivots = {
-            u for u in vertices
-            if u in subgraph_forest
-                and len(nx.dfs_tree(subgraph_forest, u).nodes) >= self.steps
-        }
+        pivots = {u for u in vertices if len(forest_trees[u]) >= self.steps}
         return pivots, potential_vertices
 
 
