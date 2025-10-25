@@ -15,13 +15,16 @@ from .pathstore import PathStore
 REMOVED = "<removed-node>"
 
 
-class UnsortedShortestPaths:
+class ShortestPath:
 
     def __init__(self, graph: nx.Graph, weight_key="weight"):
         self._weight_key = weight_key
         self._node_mapping = {}
+        # store the edges from the original graph so we don't iterate over
+        # empty nodes in the normalized graph
+        self._edge_graph = nx.DiGraph()
         self.graph = self._normalize(graph)
-        self._vertex_count = self.graph.number_of_nodes()
+        self._vertex_count = graph.number_of_nodes()
         self.steps = math.floor(math.pow(math.log(self._vertex_count), 1/3))
         # XXX: need a better name for this value
         self._t = math.floor(math.pow(math.log(self._vertex_count), 2/3))
@@ -36,15 +39,16 @@ class UnsortedShortestPaths:
         level = math.ceil(math.log(self._vertex_count) / self._t)
         # l = ⌈(log n)/t⌉, B = ∞, S = {s}
         self.bmssp(level, math.inf, {u})
-        print(f"Shortest path length: {self._distances[v]}")
         path = [v]
         next_node = v
+
         while True:
             next_node = self._predecessors[next_node]
             path.append(next_node)
             if next_node == u:
                 break
-        print(f"Path: {path[::-1]}")
+
+        return self._distances[v], path[::-1]
 
     def _normalize(self, graph: nx.Graph) -> nx.Graph:
         G = nx.DiGraph()
@@ -52,13 +56,13 @@ class UnsortedShortestPaths:
         max_degree = max(graph.degree, key=lambda x: x[1])[1] + 1
         x = defaultdict(lambda: next(counter))
 
-        # Create a new graph composed of a constant-degree cycle for each
-        #   vertex v in G and its neighbours
+        # Create a new graph composed of a constant-degree strongly-connected
+        #   cycle for each vertex v in G and its neighbours
         for u in graph.nodes:
             nodes = [x[u]]
             for v in graph.neighbors(u):
                 nodes.append(x[v])
-            # pad nod list so all nodes have matching in/out degrees
+            # pad node list so all nodes have matching in/out degrees
             while len(nodes) < max_degree:
                 nodes.append(next(counter))
             for u in nodes:
@@ -70,7 +74,9 @@ class UnsortedShortestPaths:
         # For every edge (u, v) in G, add a directed edge from vertex x(u, v)
         #   to x(v, u) with weight w(u, v)
         for (u, v, w) in graph.edges.data(self._weight_key):
-            G.add_edge(x[u], x[v], **{self._weight_key: w})
+            u, v = x[u], x[v]
+            G.add_edge(u, v, **{self._weight_key: w})
+            self._edge_graph.add_edge(u, v, **{self._weight_key: w})
 
         self._node_mapping = x
         return G
@@ -105,7 +111,7 @@ class UnsortedShortestPaths:
             step_vertices.append(set())
             # find edges in the graph such that the source vertex is in the
             # subset of potential vertices from the previous step
-            edges = self.graph.edges(step_vertices[i-1], data=self._weight_key)
+            edges = self._edge_graph.edges(step_vertices[i-1], data=self._weight_key)
 
             # walk the edges we found and relax if we find a shorter path
             for (u, v, w) in edges:
@@ -122,7 +128,6 @@ class UnsortedShortestPaths:
                     # for each edge (u, v) in the broader graph, we create a
                     # forest of nodes such that u, v ∈ potential_vertices and
                     # dist[v] = dist[u] + weight(u, v) <- relaxed edge
-                    # XXX: should this be global to the algorithm run?
                     subgraph_forest.add_edge(u, v, **{self._weight_key: w})
 
             # add all potential vertices (destination nodes of shortest paths)
@@ -199,7 +204,7 @@ class UnsortedShortestPaths:
 
             frontier.add(u)
 
-            for (u, v, w) in self.graph.edges(u, data=self._weight_key):
+            for (u, v, w) in self._edge_graph.edges(u, data=self._weight_key):
                 if w is None:
                     continue
                 path_length = d + w
@@ -283,7 +288,7 @@ class UnsortedShortestPaths:
             batch = []
 
             for node in s:
-                for (u, v, w) in self.graph.edges(node, data=self._weight_key):
+                for (u, v, w) in self._edge_graph.edges(node, data=self._weight_key):
                     if w is None:
                         continue
                     path_length = self._distances[u] + w
@@ -315,4 +320,4 @@ class UnsortedShortestPaths:
 
 
 def shortest_path(graph: nx.Graph, src, dest, weight_key="weight"):
-    return UnsortedShortestPaths(graph, weight_key).shortest_path(src, dest)
+    return ShortestPath(graph, weight_key).shortest_path(src, dest)
