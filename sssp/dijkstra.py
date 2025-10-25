@@ -6,29 +6,7 @@ from itertools import count
 
 REMOVED = "<removed-node>"
 
-#   function Dijkstra(Graph, source):
-#       Q ← Queue storing vertex priority
-#
-#       dist[source] ← 0                          // Initialization
-#       Q.add_with_priority(source, 0)            // associated priority equals dist[·]
-#
-#       for each vertex v in Graph.Vertices:
-#           if v ≠ source
-#               prev[v] ← UNDEFINED               // Predecessor of v
-#              dist[v] ← INFINITY                // Unknown distance from source to v
-#              Q.add_with_priority(v, INFINITY)
-#
-#
-#      while Q is not empty:                     // The main loop
-#          u ← Q.extract_min()                   // Remove and return best vertex
-#          for each arc (u, v) :                 // Go through all v neighbors of u
-#              alt ← dist[u] + Graph.Edges(u, v)
-#              if alt < dist[v]:
-#                  prev[v] ← u
-#                  dist[v] ← alt
-#                  Q.decrease_priority(v, alt)
-#
-#      return (dist, prev)
+
 def dijkstra(graph: nx.Graph, src, dest):
     frontier = []
     counter = count()
